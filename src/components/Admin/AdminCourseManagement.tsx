@@ -47,16 +47,93 @@ const AdminCourseManagement: React.FC = () => {
   const formatSchedule = (schedule: any) => {
     if (typeof schedule === 'string') return schedule;
     
-    const enabledDays = Object.entries(schedule)
-      .filter(([_, dayData]: [string, any]) => dayData.enabled)
-      .map(([day, dayData]: [string, any]) => 
-        `${day.charAt(0).toUpperCase() + day.slice(1)} ${dayData.startTime}-${dayData.endTime}`
-      );
+    if (schedule && typeof schedule === 'object') {
+      const enabledDays = Object.entries(schedule)
+        .filter(([_, dayData]: [string, any]) => dayData && dayData.enabled)
+        .map(([day, dayData]: [string, any]) => 
+          `${day.charAt(0).toUpperCase() + day.slice(1)} ${dayData.startTime}-${dayData.endTime}`
+        );
+      
+      return enabledDays.length > 0 ? enabledDays.join(', ') : 'No schedule set';
+    }
     
-    return enabledDays.length > 0 ? enabledDays.join(', ') : 'No schedule set';
+    return 'No schedule set';
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const parseScheduleFromString = (scheduleString: string) => {
+    const defaultSchedule = {
+      monday: { enabled: false, startTime: '09:00', endTime: '10:00' },
+      tuesday: { enabled: false, startTime: '09:00', endTime: '10:00' },
+      wednesday: { enabled: false, startTime: '09:00', endTime: '10:00' },
+      thursday: { enabled: false, startTime: '09:00', endTime: '10:00' },
+      friday: { enabled: false, startTime: '09:00', endTime: '10:00' },
+      saturday: { enabled: false, startTime: '09:00', endTime: '10:00' },
+      sunday: { enabled: false, startTime: '09:00', endTime: '10:00' }
+    };
+
+    if (!scheduleString || typeof scheduleString !== 'string') {
+      return defaultSchedule;
+    }
+
+    // Parse schedule string like "Mon, Wed, Fri - 10:00 AM"
+    try {
+      const parts = scheduleString.split(' - ');
+      if (parts.length === 2) {
+        const daysStr = parts[0].toLowerCase();
+        const timeStr = parts[1];
+        
+        // Convert time to 24-hour format
+        let startTime = '09:00';
+        let endTime = '10:00';
+        
+        if (timeStr.includes('AM') || timeStr.includes('PM')) {
+          const time = timeStr.replace(/AM|PM/g, '').trim();
+          const hour = parseInt(time.split(':')[0]);
+          const minute = time.split(':')[1] || '00';
+          
+          if (timeStr.includes('PM') && hour !== 12) {
+            startTime = `${hour + 12}:${minute}`;
+            endTime = `${hour + 13}:${minute}`;
+          } else if (timeStr.includes('AM') && hour === 12) {
+            startTime = `00:${minute}`;
+            endTime = `01:${minute}`;
+          } else {
+            startTime = `${hour.toString().padStart(2, '0')}:${minute}`;
+            endTime = `${(hour + 1).toString().padStart(2, '0')}:${minute}`;
+          }
+        }
+
+        // Map day abbreviations to full names
+        const dayMap: { [key: string]: string } = {
+          'mon': 'monday',
+          'tue': 'tuesday', 
+          'wed': 'wednesday',
+          'thu': 'thursday',
+          'fri': 'friday',
+          'sat': 'saturday',
+          'sun': 'sunday'
+        };
+
+        // Enable days mentioned in the schedule
+        Object.keys(dayMap).forEach(abbr => {
+          if (daysStr.includes(abbr)) {
+            const fullDay = dayMap[abbr];
+            defaultSchedule[fullDay as keyof typeof defaultSchedule] = {
+              enabled: true,
+              startTime,
+              endTime
+            };
+          }
+        });
+      }
+    } catch (error) {
+      console.error('Error parsing schedule:', error);
+    }
+
+    return defaultSchedule;
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const selectedTutor = staff.find(s => s.id === formData.tutorId);
     
@@ -66,15 +143,22 @@ const AdminCourseManagement: React.FC = () => {
       enrolled: editingCourse?.enrolled || 0
     };
 
-    if (editingCourse) {
-      updateCourse(editingCourse.id, courseData);
-      setEditingCourse(null);
-    } else {
-      addCourse(courseData);
-    }
+    try {
+      if (editingCourse) {
+        await updateCourse(editingCourse.id, courseData);
+        setEditingCourse(null);
+        alert('Course updated successfully!');
+      } else {
+        await addCourse(courseData);
+        alert('Course added successfully!');
+      }
 
-    resetForm();
-    setShowAddForm(false);
+      resetForm();
+      setShowAddForm(false);
+    } catch (error) {
+      console.error('Error saving course:', error);
+      alert('Error saving course. Please try again.');
+    }
   };
 
   const resetForm = () => {
@@ -101,12 +185,15 @@ const AdminCourseManagement: React.FC = () => {
 
   const handleEdit = (course: Course) => {
     setEditingCourse(course);
-    setFormData({
-      name: course.name,
-      description: course.description,
-      admissionFee: course.admissionFee || 0,
-      monthlyFee: course.monthlyFee || 0,
-      schedule: course.schedule || {
+    
+    // Parse the schedule properly
+    let scheduleData;
+    if (typeof course.schedule === 'string') {
+      scheduleData = parseScheduleFromString(course.schedule);
+    } else if (course.schedule && typeof course.schedule === 'object') {
+      scheduleData = course.schedule;
+    } else {
+      scheduleData = {
         monday: { enabled: false, startTime: '09:00', endTime: '10:00' },
         tuesday: { enabled: false, startTime: '09:00', endTime: '10:00' },
         wednesday: { enabled: false, startTime: '09:00', endTime: '10:00' },
@@ -114,18 +201,32 @@ const AdminCourseManagement: React.FC = () => {
         friday: { enabled: false, startTime: '09:00', endTime: '10:00' },
         saturday: { enabled: false, startTime: '09:00', endTime: '10:00' },
         sunday: { enabled: false, startTime: '09:00', endTime: '10:00' }
-      },
+      };
+    }
+
+    setFormData({
+      name: course.name || '',
+      description: course.description || '',
+      admissionFee: course.admissionFee || 0,
+      monthlyFee: course.monthlyFee || 0,
+      schedule: scheduleData,
       startDate: course.startDate || '',
       endDate: course.endDate || '',
-      capacity: course.capacity,
-      tutorId: course.tutorId
+      capacity: course.capacity || 0,
+      tutorId: course.tutorId || ''
     });
     setShowAddForm(true);
   };
 
-  const handleDelete = (courseId: string) => {
-    if (window.confirm('Are you sure you want to delete this course?')) {
-      removeCourse(courseId);
+  const handleDelete = async (courseId: string) => {
+    if (window.confirm('Are you sure you want to delete this course? This action cannot be undone.')) {
+      try {
+        await removeCourse(courseId);
+        alert('Course deleted successfully!');
+      } catch (error) {
+        console.error('Error deleting course:', error);
+        alert('Error deleting course. Please try again.');
+      }
     }
   };
 
@@ -135,7 +236,7 @@ const AdminCourseManagement: React.FC = () => {
       schedule: {
         ...prev.schedule,
         [day]: {
-          ...prev.schedule[day],
+          ...prev.schedule[day as keyof typeof prev.schedule],
           [field]: value
         }
       }
@@ -155,8 +256,8 @@ const AdminCourseManagement: React.FC = () => {
     }, 0);
 
     const attendanceRate = totalAttendance > 0 ? (presentAttendance / totalAttendance) * 100 : 0;
-    const revenue = enrolledStudents.length * (courses.find(c => c.id === courseId)?.admissionFee || 0) + 
-                   enrolledStudents.length * (courses.find(c => c.id === courseId)?.monthlyFee || 0) * 6; // Assuming 6 months
+    const revenue = enrolledStudents.length * ((courses.find(c => c.id === courseId)?.admissionFee || 0) + 
+                   (courses.find(c => c.id === courseId)?.monthlyFee || 0) * 6); // Assuming 6 months
 
     return {
       enrolledStudents: enrolledStudents.length,
@@ -164,6 +265,12 @@ const AdminCourseManagement: React.FC = () => {
       revenue,
       totalClasses: totalAttendance
     };
+  };
+
+  const closeModal = () => {
+    setShowAddForm(false);
+    setEditingCourse(null);
+    resetForm();
   };
 
   const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
@@ -394,11 +501,7 @@ const AdminCourseManagement: React.FC = () => {
                   {editingCourse ? 'Edit Course' : 'Add New Course'}
                 </h2>
                 <button
-                  onClick={() => {
-                    setShowAddForm(false);
-                    setEditingCourse(null);
-                    resetForm();
-                  }}
+                  onClick={closeModal}
                   className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
                 >
                   <X className="h-6 w-6" />
@@ -521,7 +624,7 @@ const AdminCourseManagement: React.FC = () => {
                         <input
                           type="checkbox"
                           id={day}
-                          checked={formData.schedule[day].enabled}
+                          checked={formData.schedule[day as keyof typeof formData.schedule]?.enabled || false}
                           onChange={(e) => handleScheduleChange(day, 'enabled', e.target.checked)}
                           className="h-4 w-4 text-purple-600 focus:ring-purple-500 border-gray-300 dark:border-gray-600 rounded"
                         />
@@ -530,18 +633,18 @@ const AdminCourseManagement: React.FC = () => {
                         </label>
                       </div>
                       
-                      {formData.schedule[day].enabled && (
+                      {formData.schedule[day as keyof typeof formData.schedule]?.enabled && (
                         <div className="flex items-center space-x-2">
                           <input
                             type="time"
-                            value={formData.schedule[day].startTime}
+                            value={formData.schedule[day as keyof typeof formData.schedule]?.startTime || '09:00'}
                             onChange={(e) => handleScheduleChange(day, 'startTime', e.target.value)}
                             className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                           />
                           <span className="text-gray-500 dark:text-gray-400">to</span>
                           <input
                             type="time"
-                            value={formData.schedule[day].endTime}
+                            value={formData.schedule[day as keyof typeof formData.schedule]?.endTime || '10:00'}
                             onChange={(e) => handleScheduleChange(day, 'endTime', e.target.value)}
                             className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                           />
@@ -555,11 +658,7 @@ const AdminCourseManagement: React.FC = () => {
               <div className="flex justify-end space-x-4 pt-6 border-t border-gray-200 dark:border-gray-700">
                 <button
                   type="button"
-                  onClick={() => {
-                    setShowAddForm(false);
-                    setEditingCourse(null);
-                    resetForm();
-                  }}
+                  onClick={closeModal}
                   className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
                 >
                   Cancel
