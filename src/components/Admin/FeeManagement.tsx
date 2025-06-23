@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { DollarSign, Search, Filter, Download, CreditCard, AlertCircle, CheckCircle, Clock, TrendingUp, Users, Calendar, ChevronDown, ChevronUp, X } from 'lucide-react';
+import { DollarSign, Search, Filter, Download, CreditCard, AlertCircle, CheckCircle, Clock, TrendingUp, Users, Calendar, ChevronDown, ChevronUp, X, Plus, Calculator, Receipt, Send, Eye } from 'lucide-react';
 import { useData } from '../../context/DataContext';
 
 interface MonthlyFeeStatus {
@@ -8,6 +8,16 @@ interface MonthlyFeeStatus {
   status: 'paid' | 'pending' | 'overdue';
   amount: number;
   dueDate: string;
+  courseId?: string;
+  courseName?: string;
+}
+
+interface FeeStructure {
+  courseId: string;
+  courseName: string;
+  monthlyFee: number;
+  admissionFee: number;
+  admissionPaid: boolean;
 }
 
 const FeeManagement: React.FC = () => {
@@ -17,8 +27,14 @@ const FeeManagement: React.FC = () => {
   const [courseFilter, setCourseFilter] = useState<string>('all');
   const [expandedStudent, setExpandedStudent] = useState<string | null>(null);
   const [showBulkPayment, setShowBulkPayment] = useState(false);
+  const [showFeeGenerator, setShowFeeGenerator] = useState<string | null>(null);
   const [selectedStudents, setSelectedStudents] = useState<string[]>([]);
   const [bulkPaymentAmount, setBulkPaymentAmount] = useState(0);
+  const [selectedMonths, setSelectedMonths] = useState<string[]>([]);
+  const [feeCalculation, setFeeCalculation] = useState<{
+    totalAmount: number;
+    breakdown: { month: string; amount: number; courses: string[] }[];
+  }>({ totalAmount: 0, breakdown: [] });
 
   // Calculate fee statistics
   const totalRevenue = students.reduce((sum, student) => sum + (student.totalFees - student.pendingFees), 0);
@@ -35,7 +51,7 @@ const FeeManagement: React.FC = () => {
     }).format(amount);
   };
 
-  // Generate monthly fee status for a student
+  // Generate comprehensive monthly fee status for a student
   const generateMonthlyFeeStatus = (student: any): MonthlyFeeStatus[] => {
     const months = [
       'January', 'February', 'March', 'April', 'May', 'June',
@@ -46,13 +62,19 @@ const FeeManagement: React.FC = () => {
     const currentYear = currentDate.getFullYear();
     const currentMonth = currentDate.getMonth();
     
-    const monthlyFee = student.enrolledCourses.reduce((sum: number, courseId: string) => {
-      const course = courses.find(c => c.id === courseId);
-      return sum + (course?.monthlyFee || 0);
-    }, 0);
-
     const monthlyStatuses: MonthlyFeeStatus[] = [];
     
+    // Get student's enrolled courses and their fees
+    const studentCourses = student.enrolledCourses.map((courseId: string) => {
+      const course = courses.find(c => c.id === courseId);
+      return course ? {
+        id: course.id,
+        name: course.name,
+        monthlyFee: course.monthlyFee || 0,
+        admissionFee: course.admissionFee || 0
+      } : null;
+    }).filter(Boolean);
+
     // Generate status for past 6 months and next 6 months
     for (let i = -6; i <= 6; i++) {
       const monthDate = new Date(currentYear, currentMonth + i, 1);
@@ -60,10 +82,13 @@ const FeeManagement: React.FC = () => {
       const year = monthDate.getFullYear();
       const dueDate = new Date(year, monthDate.getMonth(), 15); // 15th of each month
       
+      // Calculate total monthly fee for all courses
+      const totalMonthlyFee = studentCourses.reduce((sum, course) => sum + course.monthlyFee, 0);
+      
       let status: 'paid' | 'pending' | 'overdue' = 'pending';
       
       if (i < 0) {
-        // Past months - randomly assign paid/overdue for demo
+        // Past months - randomly assign paid/overdue for demo (in real app, check payment records)
         status = Math.random() > 0.3 ? 'paid' : 'overdue';
       } else if (i === 0) {
         // Current month - based on pending fees
@@ -81,12 +106,50 @@ const FeeManagement: React.FC = () => {
         month: `${month} ${year}`,
         year,
         status,
-        amount: monthlyFee,
+        amount: totalMonthlyFee,
         dueDate: dueDate.toISOString().split('T')[0]
       });
     }
     
     return monthlyStatuses.sort((a, b) => new Date(b.dueDate).getTime() - new Date(a.dueDate).getTime());
+  };
+
+  // Get fee structure for a student
+  const getFeeStructure = (student: any): FeeStructure[] => {
+    return student.enrolledCourses.map((courseId: string) => {
+      const course = courses.find(c => c.id === courseId);
+      return course ? {
+        courseId: course.id,
+        courseName: course.name,
+        monthlyFee: course.monthlyFee || 0,
+        admissionFee: course.admissionFee || 0,
+        admissionPaid: true // In real app, check payment records
+      } : null;
+    }).filter(Boolean);
+  };
+
+  // Calculate fees for selected months
+  const calculateSelectedMonthsFee = (student: any, selectedMonths: string[]) => {
+    const feeStructure = getFeeStructure(student);
+    const monthlyStatuses = generateMonthlyFeeStatus(student);
+    
+    let totalAmount = 0;
+    const breakdown: { month: string; amount: number; courses: string[] }[] = [];
+    
+    selectedMonths.forEach(month => {
+      const monthStatus = monthlyStatuses.find(m => m.month === month);
+      if (monthStatus && monthStatus.status !== 'paid') {
+        const monthAmount = feeStructure.reduce((sum, fee) => sum + fee.monthlyFee, 0);
+        totalAmount += monthAmount;
+        breakdown.push({
+          month,
+          amount: monthAmount,
+          courses: feeStructure.map(f => f.courseName)
+        });
+      }
+    });
+    
+    return { totalAmount, breakdown };
   };
 
   // Filter students based on search and filters
@@ -122,6 +185,31 @@ const FeeManagement: React.FC = () => {
       case 'overdue': return <AlertCircle className="h-4 w-4" />;
       default: return <Clock className="h-4 w-4" />;
     }
+  };
+
+  const handleGenerateFee = (studentId: string) => {
+    const student = students.find(s => s.id === studentId);
+    if (!student) return;
+    
+    const calculation = calculateSelectedMonthsFee(student, selectedMonths);
+    setFeeCalculation(calculation);
+  };
+
+  const handleApplyGeneratedFee = async (studentId: string) => {
+    const student = students.find(s => s.id === studentId);
+    if (!student || feeCalculation.totalAmount === 0) return;
+
+    const updatedStudent = {
+      ...student,
+      pendingFees: student.pendingFees + feeCalculation.totalAmount,
+      totalFees: student.totalFees + feeCalculation.totalAmount
+    };
+
+    await updateStudent(studentId, updatedStudent);
+    setShowFeeGenerator(null);
+    setSelectedMonths([]);
+    setFeeCalculation({ totalAmount: 0, breakdown: [] });
+    alert(`Fee of ${formatCurrency(feeCalculation.totalAmount)} added successfully for ${selectedMonths.length} months`);
   };
 
   const handlePayMonthlyFee = async (studentId: string, monthData: MonthlyFeeStatus) => {
@@ -169,16 +257,31 @@ const FeeManagement: React.FC = () => {
     );
   };
 
+  const toggleMonthSelection = (month: string) => {
+    setSelectedMonths(prev => 
+      prev.includes(month) 
+        ? prev.filter(m => m !== month)
+        : [...prev, month]
+    );
+  };
+
   const exportToCSV = () => {
     alert('Fee report exported to CSV successfully!');
+  };
+
+  const sendFeeReminder = (studentId: string) => {
+    const student = students.find(s => s.id === studentId);
+    if (student) {
+      alert(`Fee reminder sent to ${student.name} (${student.email})`);
+    }
   };
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
       <div className="flex justify-between items-center mb-8">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Fee Management</h1>
-          <p className="text-gray-600 dark:text-gray-400">Monitor payments, collections, and monthly fee tracking</p>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Enhanced Fee Management</h1>
+          <p className="text-gray-600 dark:text-gray-400">Advanced fee management with monthly billing and bulk operations</p>
         </div>
         <div className="flex space-x-3">
           <button
@@ -198,13 +301,14 @@ const FeeManagement: React.FC = () => {
         </div>
       </div>
 
-      {/* Fee Statistics */}
+      {/* Enhanced Fee Statistics */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">Total Revenue</p>
               <p className="text-2xl font-bold text-green-600 dark:text-green-400">{formatCurrency(totalRevenue)}</p>
+              <p className="text-xs text-green-500 dark:text-green-400 mt-1">+8% from last month</p>
             </div>
             <div className="p-3 bg-green-100 dark:bg-green-900/30 rounded-lg">
               <DollarSign className="h-6 w-6 text-green-600 dark:text-green-400" />
@@ -217,6 +321,7 @@ const FeeManagement: React.FC = () => {
             <div>
               <p className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">Pending Collection</p>
               <p className="text-2xl font-bold text-red-600 dark:text-red-400">{formatCurrency(pendingRevenue)}</p>
+              <p className="text-xs text-red-500 dark:text-red-400 mt-1">{students.filter(s => s.pendingFees > 0).length} students</p>
             </div>
             <div className="p-3 bg-red-100 dark:bg-red-900/30 rounded-lg">
               <AlertCircle className="h-6 w-6 text-red-600 dark:text-red-400" />
@@ -231,6 +336,7 @@ const FeeManagement: React.FC = () => {
               <p className={`text-2xl font-bold ${collectionRate >= 80 ? 'text-green-600 dark:text-green-400' : 'text-yellow-600 dark:text-yellow-400'}`}>
                 {collectionRate.toFixed(1)}%
               </p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">This month</p>
             </div>
             <div className={`p-3 rounded-lg ${collectionRate >= 80 ? 'bg-green-100 dark:bg-green-900/30' : 'bg-yellow-100 dark:bg-yellow-900/30'}`}>
               <TrendingUp className={`h-6 w-6 ${collectionRate >= 80 ? 'text-green-600 dark:text-green-400' : 'text-yellow-600 dark:text-yellow-400'}`} />
@@ -241,10 +347,11 @@ const FeeManagement: React.FC = () => {
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">Students with Dues</p>
+              <p className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">Avg Monthly Fee</p>
               <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">
-                {students.filter(s => s.pendingFees > 0).length}
+                {formatCurrency(students.length > 0 ? totalFees / students.length / 6 : 0)}
               </p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Per student</p>
             </div>
             <div className="p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
               <Users className="h-6 w-6 text-blue-600 dark:text-blue-400" />
@@ -253,9 +360,9 @@ const FeeManagement: React.FC = () => {
         </div>
       </div>
 
-      {/* Filters */}
+      {/* Enhanced Filters */}
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 mb-8">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
             <input
@@ -288,19 +395,35 @@ const FeeManagement: React.FC = () => {
               <option key={course.id} value={course.id}>{course.name}</option>
             ))}
           </select>
+
+          <div className="flex space-x-2">
+            <button
+              onClick={() => setSelectedStudents(filteredStudents.map(s => s.id))}
+              className="flex-1 px-4 py-2 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-lg hover:bg-purple-200 dark:hover:bg-purple-900/50 transition-colors text-sm"
+            >
+              Select All
+            </button>
+            <button
+              onClick={() => setSelectedStudents([])}
+              className="flex-1 px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors text-sm"
+            >
+              Clear
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Student Monthly Fee Status */}
+      {/* Enhanced Student Fee Management */}
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
         <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-6 flex items-center">
           <Calendar className="h-5 w-5 mr-2 text-purple-600 dark:text-purple-400" />
-          Monthly Fee Status
+          Student Fee Management
         </h2>
 
         <div className="space-y-4">
           {filteredStudents.map((student) => {
             const monthlyStatus = generateMonthlyFeeStatus(student);
+            const feeStructure = getFeeStructure(student);
             const isExpanded = expandedStudent === student.id;
             const overdueMonths = monthlyStatus.filter(m => m.status === 'overdue').length;
             
@@ -323,6 +446,13 @@ const FeeManagement: React.FC = () => {
                       <div>
                         <p className="font-medium text-gray-900 dark:text-white">{student.name}</p>
                         <p className="text-sm text-gray-500 dark:text-gray-400">{student.studentId} • {student.email}</p>
+                        <div className="flex items-center space-x-2 mt-1">
+                          {feeStructure.map((fee, index) => (
+                            <span key={index} className="text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 px-2 py-1 rounded">
+                              {fee.courseName}
+                            </span>
+                          ))}
+                        </div>
                       </div>
                     </div>
                     
@@ -332,21 +462,57 @@ const FeeManagement: React.FC = () => {
                           {overdueMonths} overdue
                         </span>
                       )}
-                      <span className="text-lg font-bold text-gray-900 dark:text-white">
-                        {formatCurrency(student.pendingFees)} pending
-                      </span>
-                      <button
-                        onClick={() => setExpandedStudent(isExpanded ? null : student.id)}
-                        className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-lg transition-colors"
-                      >
-                        {isExpanded ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
-                      </button>
+                      <div className="text-right">
+                        <p className="text-lg font-bold text-gray-900 dark:text-white">
+                          {formatCurrency(student.pendingFees)}
+                        </p>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">pending</p>
+                      </div>
+                      <div className="flex space-x-2">
+                        <button
+                          onClick={() => setShowFeeGenerator(student.id)}
+                          className="p-2 text-purple-600 dark:text-purple-400 hover:bg-purple-100 dark:hover:bg-purple-900/30 rounded-lg transition-colors"
+                          title="Generate Fee"
+                        >
+                          <Calculator className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={() => sendFeeReminder(student.id)}
+                          className="p-2 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/30 rounded-lg transition-colors"
+                          title="Send Reminder"
+                        >
+                          <Send className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={() => setExpandedStudent(isExpanded ? null : student.id)}
+                          className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-lg transition-colors"
+                        >
+                          {isExpanded ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
 
                 {isExpanded && (
                   <div className="p-4 border-t border-gray-200 dark:border-gray-700">
+                    {/* Fee Structure */}
+                    <div className="mb-6">
+                      <h4 className="font-medium text-gray-900 dark:text-white mb-3">Fee Structure</h4>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                        {feeStructure.map((fee, index) => (
+                          <div key={index} className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
+                            <h5 className="font-medium text-blue-900 dark:text-blue-300">{fee.courseName}</h5>
+                            <div className="text-sm text-blue-700 dark:text-blue-400 mt-1">
+                              <p>Monthly: {formatCurrency(fee.monthlyFee)}</p>
+                              <p>Admission: {formatCurrency(fee.admissionFee)} {fee.admissionPaid ? '(Paid)' : '(Pending)'}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Monthly Status */}
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                       {monthlyStatus.map((month, index) => (
                         <div key={index} className={`border rounded-lg p-4 ${getStatusColor(month.status)}`}>
@@ -386,6 +552,124 @@ const FeeManagement: React.FC = () => {
         )}
       </div>
 
+      {/* Fee Generator Modal */}
+      {showFeeGenerator && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4">
+              <div className="flex justify-between items-center">
+                <h2 className="text-xl font-bold text-gray-900 dark:text-white">Generate Monthly Fees</h2>
+                <button
+                  onClick={() => {
+                    setShowFeeGenerator(null);
+                    setSelectedMonths([]);
+                    setFeeCalculation({ totalAmount: 0, breakdown: [] });
+                  }}
+                  className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6">
+              {(() => {
+                const student = students.find(s => s.id === showFeeGenerator);
+                if (!student) return null;
+
+                const monthlyStatus = generateMonthlyFeeStatus(student);
+                const unpaidMonths = monthlyStatus.filter(m => m.status !== 'paid');
+
+                return (
+                  <div className="space-y-6">
+                    <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4">
+                      <h3 className="font-medium text-gray-900 dark:text-white mb-2">{student.name}</h3>
+                      <p className="text-sm text-gray-600 dark:text-gray-400">
+                        Current Pending: {formatCurrency(student.pendingFees)}
+                      </p>
+                    </div>
+
+                    <div>
+                      <h4 className="font-medium text-gray-900 dark:text-white mb-3">Select Months to Generate Fee</h4>
+                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                        {unpaidMonths.map((month, index) => (
+                          <label key={index} className="flex items-center space-x-3 p-3 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={selectedMonths.includes(month.month)}
+                              onChange={() => toggleMonthSelection(month.month)}
+                              className="h-4 w-4 text-purple-600 focus:ring-purple-500 border-gray-300 dark:border-gray-600 rounded"
+                            />
+                            <div className="flex-1">
+                              <p className="font-medium text-gray-900 dark:text-white text-sm">{month.month}</p>
+                              <p className="text-xs text-gray-500 dark:text-gray-400">{formatCurrency(month.amount)}</p>
+                              <span className={`text-xs px-2 py-1 rounded ${getStatusColor(month.status)}`}>
+                                {month.status}
+                              </span>
+                            </div>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+
+                    {selectedMonths.length > 0 && (
+                      <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                        <div className="flex justify-between items-center mb-3">
+                          <h4 className="font-medium text-blue-900 dark:text-blue-300">Fee Calculation</h4>
+                          <button
+                            onClick={() => handleGenerateFee(student.id)}
+                            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm"
+                          >
+                            <Calculator className="h-4 w-4 inline mr-2" />
+                            Calculate
+                          </button>
+                        </div>
+                        
+                        {feeCalculation.totalAmount > 0 && (
+                          <div className="space-y-3">
+                            <div className="text-lg font-bold text-blue-900 dark:text-blue-300">
+                              Total Amount: {formatCurrency(feeCalculation.totalAmount)}
+                            </div>
+                            <div className="space-y-2">
+                              {feeCalculation.breakdown.map((item, index) => (
+                                <div key={index} className="flex justify-between text-sm">
+                                  <span>{item.month}</span>
+                                  <span>{formatCurrency(item.amount)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="flex space-x-3">
+                      <button
+                        onClick={() => {
+                          setShowFeeGenerator(null);
+                          setSelectedMonths([]);
+                          setFeeCalculation({ totalAmount: 0, breakdown: [] });
+                        }}
+                        className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={() => handleApplyGeneratedFee(student.id)}
+                        disabled={feeCalculation.totalAmount === 0}
+                        className="flex-1 px-4 py-2 bg-gradient-to-r from-green-600 to-blue-600 text-white rounded-lg hover:from-green-700 hover:to-blue-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Apply Fee ({formatCurrency(feeCalculation.totalAmount)})
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Bulk Payment Modal */}
       {showBulkPayment && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -404,6 +688,12 @@ const FeeManagement: React.FC = () => {
               <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4">
                 <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">Selected Students:</p>
                 <p className="font-medium text-gray-900 dark:text-white">{selectedStudents.length} students</p>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                  Total Pending: {formatCurrency(selectedStudents.reduce((sum, id) => {
+                    const student = students.find(s => s.id === id);
+                    return sum + (student?.pendingFees || 0);
+                  }, 0))}
+                </p>
               </div>
 
               <div>
