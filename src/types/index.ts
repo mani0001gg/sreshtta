@@ -34,11 +34,11 @@ export interface Course {
   description: string;
   tutorId: string;
   tutorName: string;
+  department?: string;
   admissionFee?: number;
   monthlyFee?: number;
   schedule: any; // Can be string or object with day-wise schedule
   startDate?: string;
-  endDate?: string;
   capacity: number;
   enrolled: number;
 }

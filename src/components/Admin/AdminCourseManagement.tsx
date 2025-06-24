@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { BookOpen, Plus, Users, Clock, DollarSign, Edit3, Trash2, Search, User, TrendingUp, Calendar, Save, X } from 'lucide-react';
+import { BookOpen, Plus, Users, Clock, DollarSign, Edit3, Trash2, Search, User, TrendingUp, Calendar, Save, X, Building } from 'lucide-react';
 import { useData } from '../../context/DataContext';
 import { Course } from '../../types';
 
@@ -8,6 +8,7 @@ const AdminCourseManagement: React.FC = () => {
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingCourse, setEditingCourse] = useState<Course | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [showNewDepartmentInput, setShowNewDepartmentInput] = useState(false);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -24,10 +25,27 @@ const AdminCourseManagement: React.FC = () => {
       sunday: { enabled: false, startTime: '09:00', endTime: '10:00' }
     },
     startDate: '',
-    endDate: '',
     capacity: 0,
-    tutorId: ''
+    tutorId: '',
+    department: '',
+    newDepartment: ''
   });
+
+  // Get unique departments from existing courses and staff
+  const existingDepartments = Array.from(new Set([
+    ...courses.map(course => course.department).filter(Boolean),
+    ...staff.map(member => member.department).filter(Boolean),
+    'Fine Arts',
+    'Contemporary Arts', 
+    'Digital Arts',
+    'Sculpture',
+    'Photography',
+    'Painting',
+    'Drawing',
+    'Ceramics',
+    'Printmaking',
+    'Mixed Media'
+  ])).sort();
 
   const filteredCourses = courses.filter(course =>
     course.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -75,14 +93,12 @@ const AdminCourseManagement: React.FC = () => {
       return defaultSchedule;
     }
 
-    // Parse schedule string like "Mon, Wed, Fri - 10:00 AM"
     try {
       const parts = scheduleString.split(' - ');
       if (parts.length === 2) {
         const daysStr = parts[0].toLowerCase();
         const timeStr = parts[1];
         
-        // Convert time to 24-hour format
         let startTime = '09:00';
         let endTime = '10:00';
         
@@ -103,7 +119,6 @@ const AdminCourseManagement: React.FC = () => {
           }
         }
 
-        // Map day abbreviations to full names
         const dayMap: { [key: string]: string } = {
           'mon': 'monday',
           'tue': 'tuesday', 
@@ -114,7 +129,6 @@ const AdminCourseManagement: React.FC = () => {
           'sun': 'sunday'
         };
 
-        // Enable days mentioned in the schedule
         Object.keys(dayMap).forEach(abbr => {
           if (daysStr.includes(abbr)) {
             const fullDay = dayMap[abbr];
@@ -137,11 +151,18 @@ const AdminCourseManagement: React.FC = () => {
     e.preventDefault();
     const selectedTutor = staff.find(s => s.id === formData.tutorId);
     
+    // Determine the final department value
+    const finalDepartment = formData.department === 'new' ? formData.newDepartment : formData.department;
+    
     const courseData = {
       ...formData,
+      department: finalDepartment,
       tutorName: selectedTutor?.name || '',
       enrolled: editingCourse?.enrolled || 0
     };
+
+    // Remove newDepartment from the final data
+    delete (courseData as any).newDepartment;
 
     try {
       if (editingCourse) {
@@ -177,16 +198,17 @@ const AdminCourseManagement: React.FC = () => {
         sunday: { enabled: false, startTime: '09:00', endTime: '10:00' }
       },
       startDate: '',
-      endDate: '',
       capacity: 0,
-      tutorId: ''
+      tutorId: '',
+      department: '',
+      newDepartment: ''
     });
+    setShowNewDepartmentInput(false);
   };
 
   const handleEdit = (course: Course) => {
     setEditingCourse(course);
     
-    // Parse the schedule properly
     let scheduleData;
     if (typeof course.schedule === 'string') {
       scheduleData = parseScheduleFromString(course.schedule);
@@ -211,9 +233,10 @@ const AdminCourseManagement: React.FC = () => {
       monthlyFee: course.monthlyFee || 0,
       schedule: scheduleData,
       startDate: course.startDate || '',
-      endDate: course.endDate || '',
       capacity: course.capacity || 0,
-      tutorId: course.tutorId || ''
+      tutorId: course.tutorId || '',
+      department: course.department || '',
+      newDepartment: ''
     });
     setShowAddForm(true);
   };
@@ -243,6 +266,11 @@ const AdminCourseManagement: React.FC = () => {
     }));
   };
 
+  const handleDepartmentChange = (value: string) => {
+    setFormData(prev => ({ ...prev, department: value }));
+    setShowNewDepartmentInput(value === 'new');
+  };
+
   const getCourseStats = (courseId: string) => {
     const enrolledStudents = students.filter(s => s.enrolledCourses.includes(courseId));
     const totalAttendance = enrolledStudents.reduce((sum, student) => {
@@ -257,7 +285,7 @@ const AdminCourseManagement: React.FC = () => {
 
     const attendanceRate = totalAttendance > 0 ? (presentAttendance / totalAttendance) * 100 : 0;
     const revenue = enrolledStudents.length * ((courses.find(c => c.id === courseId)?.admissionFee || 0) + 
-                   (courses.find(c => c.id === courseId)?.monthlyFee || 0) * 6); // Assuming 6 months
+                   (courses.find(c => c.id === courseId)?.monthlyFee || 0) * 6);
 
     return {
       enrolledStudents: enrolledStudents.length,
@@ -381,7 +409,7 @@ const AdminCourseManagement: React.FC = () => {
                   </div>
                   <div>
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{course.name}</h3>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">{course.startDate} - {course.endDate}</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">{course.startDate}</p>
                   </div>
                 </div>
                 <div className="flex space-x-2">
@@ -403,6 +431,17 @@ const AdminCourseManagement: React.FC = () => {
               </div>
 
               <p className="text-gray-600 dark:text-gray-400 text-sm mb-4">{course.description}</p>
+
+              {/* Department Info */}
+              {course.department && (
+                <div className="flex items-center space-x-2 mb-4 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                  <Building className="h-4 w-4 text-gray-400" />
+                  <div>
+                    <p className="text-sm font-medium text-gray-900 dark:text-white">{course.department}</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Department</p>
+                  </div>
+                </div>
+              )}
 
               {/* Tutor Info */}
               <div className="flex items-center space-x-2 mb-4 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
@@ -536,6 +575,36 @@ const AdminCourseManagement: React.FC = () => {
                 </div>
 
                 <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Department *</label>
+                  <select
+                    required
+                    value={formData.department}
+                    onChange={(e) => handleDepartmentChange(e.target.value)}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  >
+                    <option value="">Select Department</option>
+                    {existingDepartments.map(dept => (
+                      <option key={dept} value={dept}>{dept}</option>
+                    ))}
+                    <option value="new">+ Create New Department</option>
+                  </select>
+                </div>
+
+                {showNewDepartmentInput && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">New Department Name *</label>
+                    <input
+                      type="text"
+                      required={formData.department === 'new'}
+                      value={formData.newDepartment}
+                      onChange={(e) => setFormData(prev => ({ ...prev, newDepartment: e.target.value }))}
+                      className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      placeholder="Enter new department name"
+                    />
+                  </div>
+                )}
+
+                <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Assign Tutor *</label>
                   <select
                     required
@@ -598,17 +667,6 @@ const AdminCourseManagement: React.FC = () => {
                     required
                     value={formData.startDate}
                     onChange={(e) => setFormData(prev => ({ ...prev, startDate: e.target.value }))}
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">End Date *</label>
-                  <input
-                    type="date"
-                    required
-                    value={formData.endDate}
-                    onChange={(e) => setFormData(prev => ({ ...prev, endDate: e.target.value }))}
                     className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                   />
                 </div>
